@@ -24,15 +24,14 @@ class MarketStackBackEnd:
     def _load_from_file(self):
         with open('backend_data.json', 'r') as file:
             data = json.load(file)
-            df = pd.DataFrame(self._parse(data))
+            df = pd.DataFrame(data)
         return df
 
     def get_market_data(self, symbols, start_date=None, end_date=None):
         try:
             df = self._load_from_file()
         except FileNotFoundError as e:
-            with open('backend_data.json','w') as file:
-                file.write(json.dumps(self._eod_data(symbols,start_date,end_date)))
+            self._eod_data(symbols,start_date,end_date)
             df = self._load_from_file()
 
         df['date'] = pd.to_datetime(df['date'])
@@ -55,7 +54,26 @@ class MarketStackBackEnd:
         response = self.session.get(f'{self.base_url}/eod', params=params)
         if response.ok:
 
-            return json.loads(response.content)
+            first_page_content = json.loads(response.content)
+            total=first_page_content['pagination']['total']
+            extra_requests = total//first_page_content['pagination']['limit']
+
+            if extra_requests > 0:
+                print('handling pagination')
+                total_data=first_page_content['data']
+                for i in range(extra_requests+1):
+                    params['offset'] = i*limit
+                    next_request = self.session.get(f'{self.base_url}/eod', params=params)
+                    if next_request.ok:
+                        parsed_content = json.loads(next_request.content)
+                        print(parsed_content['pagination'])
+                        total_data += parsed_content['data']
+                with open('backend_data.json', 'w') as file:
+                    json.dump(total_data, file)
+
+            else:
+                with open('backend_data.json', 'w') as file:
+                    json.dump(first_page_content['data'], file)
         else:
             raise APIError(f'{response.status_code} ERROR: {response.content}')
 

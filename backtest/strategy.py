@@ -61,6 +61,8 @@ class Strategy:
     def evaluate(self,date):
         print(f'Initial investment = {self.initial_capital}')
         print(f'Portfolio Gross value at {date}: {self.portfolio_gross_value_at(date)}')
+        print(f'Total Net Profit: {self.portfolio_gross_value_at(date) - self.initial_capital-self.cash}')
+
         print(f'Fractional contributions: {self.fractional_portfolio_gross_value_at(date)}')
 
     def fractional_portfolio_gross_value_at(self, date):
