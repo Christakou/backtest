@@ -1,5 +1,5 @@
 from functools import cache
-import backtest_module.backtest_config as backtest_config
+import backtest.backtest_config as backtest_config
 import requests
 import json
 import pandas as pd
@@ -21,8 +21,20 @@ class MarketStackBackEnd:
             api_key = file.read()
         return api_key
 
+    def _load_from_file(self):
+        with open('backend_data.json', 'r') as file:
+            data = json.load(file)
+            df = pd.DataFrame(self._parse(data))
+        return df
+
     def get_market_data(self, symbols, start_date=None, end_date=None):
-        df = self._parse(self._eod_data(symbols, start_date, end_date))
+        try:
+            df = self._load_from_file()
+        except FileNotFoundError as e:
+            with open('backend_data.json','w') as file:
+                file.write(json.dumps(self._eod_data(symbols,start_date,end_date)))
+            df = self._load_from_file()
+
         df['date'] = pd.to_datetime(df['date'])
         return df
 
@@ -42,23 +54,26 @@ class MarketStackBackEnd:
         }
         response = self.session.get(f'{self.base_url}/eod', params=params)
         if response.ok:
+
             return json.loads(response.content)
         else:
             raise APIError(f'{response.status_code} ERROR: {response.content}')
 
     def _parse(self, response_content):
+
         df = pd.DataFrame(response_content['data'])
         return df
 
 
 class MarketData:
-    def __init__(self, symbols, start_date='2021-01-01', end_date='2022-01-01', backend=MarketStackBackEnd()):
+    def __init__(self, symbols=('AAPL','GOOG','IBM','MSFT','CSCO','NOK'), start_date='2018-01-01', end_date='2022-03-05', backend=MarketStackBackEnd()):
         self.data = backend.get_market_data(symbols,start_date,end_date)
         self.start_date = start_date
         self.end_date = end_date
+        self.dates = sorted(self.data['date'].unique())
         self.instruments = {}
         self.get_instruments()
-        self.name = f'MarketData-{start_date} - {end_date} - {",".join(self.instruments)}'
+        self.name = f'MarketData - {start_date} - {end_date} - {",".join(self.instruments)}'
     def __str__(self):
         return self.name
 
@@ -68,16 +83,31 @@ class MarketData:
 
     def get_instruments(self):
         for symbol in self.data['symbol'].unique():
-            self.instruments.update({symbol:Instrument(symbol,self)})
+            instrument = Instrument(symbol, self)
+            self.instruments.update({symbol: instrument})
 
     def get_instrument_prices(self, symbol):
-        return self.data[(self.data['symbol']==symbol)]['close']
+        price_series = self.data[(self.data['symbol']==symbol)][['date','close']]
+        price_series['close'] = price_series['close']
+        price_series = price_series.set_index('date')
+        return price_series
 
 
 class Instrument():
     def __init__(self, symbol, marketdata):
         self.symbol = symbol
-        self.prices = marketdata.get_instrument_prices(self.symbol)
+        self.marketdata = marketdata
+        self.prices = self.fetch_prices()
+
+    def fetch_prices(self):
+        """
+        Uses our market data object to return a price series indexed by date which will later be used in analysis
+        """
+        prices = self.marketdata.get_instrument_prices(self.symbol)
+        prices.name = f'Close prices for {self.symbol}'
+        return prices
+
+
 
     def __str__(self):
         return f'Instrument({self.symbol})'
