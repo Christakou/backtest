@@ -22,7 +22,8 @@ class TradeAction:
         return self.__str__()
 
 class Strategy:
-    def __init__(self, relevant_symbols=(), initial_capital=1000000, start_date=None, end_date=None, market_data=MarketData()):
+    def __init__(self, relevant_symbols=(), initial_capital=1000000, start_date=None, end_date=None, market_data=MarketData(), name = None):
+        self.name = name if name is not None else type(self).__name__
         self.symbols = relevant_symbols
         self.market_data = market_data
         self.start_date = start_date if start_date else self.market_data.start_date
@@ -50,18 +51,22 @@ class Strategy:
 
     def sell(self, instrument, date, quantity):
         # should handle shorts?
-        price = instrument.prices[date]
-        self.trades.append(TradeAction(instrument.symbol, 'SELL', date, quantity, price))
-        if self.holdings.get(instrument.symbol):
-            self.holdings[instrument.symbol] -= quantity
+        if self.holdings.get(instrument.symbol) is not None:
+            price = instrument.prices.loc[date].close
+            self.trades.append(TradeAction(instrument.symbol,date, 'SELL', quantity, price))
+            if self.holdings.get(instrument.symbol):
+                self.holdings[instrument.symbol] -= quantity
+            else:
+                self.holdings.update({instrument.symbol: -quantity})
+            self.cash += price * quantity
         else:
-            self.holdings.update({instrument.symbol: -quantity})
-        self.cash += price * quantity
-
+            pass
     def evaluate(self,date):
-        print(f'Initial investment = {self.initial_capital}')
-        print(f'Portfolio Gross value at {date}: {self.portfolio_gross_value_at(date)}')
-        print(f'Total Net Profit: {self.portfolio_gross_value_at(date) - self.initial_capital-self.cash}')
+        print(f'_____________________ EVALUATION: {self.name} as of {date} ____________________')
+        print('')
+        print(f'Initial investment = {self.initial_capital:.2f}')
+        print(f'Portfolio Gross value at {date}: {self.portfolio_gross_value_at(date):.2f}')
+        print(f'Total Net Profit: {self.portfolio_gross_value_at(date) - self.initial_capital + self.cash :.2f}')
 
         print(f'Fractional contributions: {self.fractional_portfolio_gross_value_at(date)}')
 
@@ -107,9 +112,44 @@ class BuyAndHoldEqualAllocation(Strategy):
                 else:
                     continue
                 break
+
+class BuyOnTheUpSellOnTheDown(Strategy):
+    """
+    Dummy strategy that buys stocks that have gone up in the last 30 days and sells stocks that have gone down
+    """
+    def __init__(self,date_gap, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.date_gap = date_gap
+    def execute(self):
+            relevant_instruments = [instrument for symbol, instrument in self.market_data.instruments.items() if
+                                    symbol in self.symbols]
+            for date in self.market_data.dates:
+                cash_to_allocate = self.cash
+                for instrument in relevant_instruments:
+                    visible_instrument_prices = instrument.prices[date:]
+                    if len(visible_instrument_prices) <self.date_gap:
+                        continue
+                    is_slope_positive = visible_instrument_prices.iloc[0] - visible_instrument_prices.iloc[-30] > 0
+
+                    if is_slope_positive['close']:
+                        if self.cash > 10000:
+                            quantity_to_buy = math.floor((cash_to_allocate//100) / instrument.prices.loc[date].close)
+                            if quantity_to_buy <= 0:
+                                break
+                            self.buy(instrument, date, quantity_to_buy)
+                    else:
+                        quantity_to_sell = self.holdings.get(instrument.symbol)
+                        self.sell(instrument, date, quantity_to_sell)
+
+                else:
+                    continue
+                break
 if __name__ == '__main__':
-    test = 'a'
-    symbols = ('AAPL', 'GOOG')
-    a = BuyAndHoldEqualAllocation(relevant_symbols=symbols)
+    a = BuyAndHoldEqualAllocation(relevant_symbols=('GOOG'), name='Buy and Hold Google and Apple')
     a.execute()
-    a.evaluate('2021-12-31')
+    a.evaluate('2021-03-01')
+
+
+    b = BuyOnTheUpSellOnTheDown(relevant_symbols=('GOOG'), date_gap=30)
+    b.execute()
+    b.evaluate('2021-03-01')
